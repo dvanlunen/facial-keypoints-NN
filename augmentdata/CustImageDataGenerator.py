@@ -1,4 +1,4 @@
-import os
+
 import numpy as np
 from keras.preprocessing.image import ImageDataGenerator
 from keras.preprocessing.image import NumpyArrayIterator
@@ -163,7 +163,6 @@ class CustImageDataGenerator(ImageDataGenerator):
 
         # use composition of homographies
         # to generate final transform that needs to be applied
-
         ## first get random amounts of transformation
         # rotation
         if self.rotation_range:
@@ -172,17 +171,21 @@ class CustImageDataGenerator(ImageDataGenerator):
             theta = 0
 
         # translation
+        # vertical shifting oddly called tx
         if self.height_shift_range:
             tx = np.random.uniform(-self.height_shift_range, self.height_shift_range)
             if self.height_shift_range < 1:
                 tx *= x.shape[img_row_axis]
+                tx = np.floor(tx)
         else:
             tx = 0
 
+        # horizontal shifting oddly called ty
         if self.width_shift_range:
             ty = np.random.uniform(-self.width_shift_range, self.width_shift_range)
             if self.width_shift_range < 1:
                 ty *= x.shape[img_col_axis]
+                ty = np.floor(ty)
         else:
             ty = 0
 
@@ -190,7 +193,7 @@ class CustImageDataGenerator(ImageDataGenerator):
         if self.zoom_range[0] == 1 and self.zoom_range[1] == 1:
             z = 1
         else:
-            z = np.random.uniform(self.zoom_range[0], self.zoom_range[1], 1)
+            z = np.random.uniform(self.zoom_range[0], self.zoom_range[1])
 
 
         # build the matrix that will shift the image input data
@@ -205,13 +208,14 @@ class CustImageDataGenerator(ImageDataGenerator):
             shift_matrix = np.array([[1, 0, tx],
                                      [0, 1, ty],
                                      [0, 0, 1]])
-            transform_matrix = shift_matrix if transform_matrix is None else np.dot(shift_matrix, transform_matrix)
+            transform_matrix = shift_matrix if transform_matrix is None else np.dot(transform_matrix, shift_matrix)
 
         if z != 1:
             zoom_matrix = np.array([[z, 0, 0],
                                     [0, z, 0],
                                     [0, 0, 1]])
-            transform_matrix = zoom_matrix if transform_matrix is None else np.dot(zoom_matrix, transform_matrix)
+            transform_matrix = zoom_matrix if transform_matrix is None else np.dot(transform_matrix, zoom_matrix)
+
 
         # potentially apply the matrix transformation
         if transform_matrix is not None:
@@ -231,9 +235,9 @@ class CustImageDataGenerator(ImageDataGenerator):
             # translate and zoom
             for ii, label in enumerate(whichlabels):
                 if label[-1]=='x':
-                    y_temp[ii] = z*(y_temp[ii] + (tx*2))
+                    y_temp[ii] = (y_temp[ii] - (ty/48.))/z
                 elif label[-1]=='y':
-                    y_temp[ii] = z*(y_temp[ii] - (ty*2))
+                    y_temp[ii] = (y_temp[ii] - (tx/48.))/z
 
             # only apply the shifts if y is still in the image
             if np.max(y_temp)<=1 and np.min(y_temp)>=-1:
@@ -323,3 +327,16 @@ class CustNumpyArrayIterator(NumpyArrayIterator):
                 img.save(os.path.join(self.save_to_dir, fname))
 
         return batch_x, batch_y
+
+    def next(self):
+        """For python 2.x.
+        # Returns
+            The next batch.
+        """
+        # Keeps under lock only the mechanism which advances
+        # the indexing of each batch.
+        with self.lock:
+            index_array = next(self.index_generator)
+        # The transformation of images is not under thread lock
+        # so it can be done in parallel
+        return self._get_batches_of_transformed_samples(index_array)
